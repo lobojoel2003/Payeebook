@@ -1,0 +1,34 @@
+name: Court or agency form
+description: Ask for a form template, or report a difference between a template and the official form
+labels: [template]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: State, county and court or agency
+      placeholder: e.g. Ohio, Franklin County Probate Court
+    validations:
+      required: true
+  - type: input
+    id: form
+    attributes:
+      label: Form name and number
+      placeholder: e.g. Guardian's Account (Form 15.0)
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: Link to the official blank form
+  - type: textarea
+    id: details
+    attributes:
+      label: What is needed or what is different?
+      description: For a correction, name the template file and the line that differs from the official form.
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Can you help?
+      options:
+        - label: I can check a draft template against the real form
+        - label: I can write the template myself (see templates/README.md)

@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags-ignore: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILD_NUMBER: ${{ github.run_number }}
+  BUILD_CHANNEL: ci
+
+jobs:
+  check:
+    name: Lint, test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check version numbers agree
+        run: node scripts/sync-version.mjs --check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Formatting
+        run: npm run format:check
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests with coverage
+        run: npm run test:coverage
+
+      - name: Validate form templates
+        run: npm run templates:validate
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e "const t=require('./coverage/coverage-summary.json').total;const r=k=>t[k].pct+'%';console.log('| Lines | Statements | Functions | Branches |\n|---|---|---|---|\n| '+[r('lines'),r('statements'),r('functions'),r('branches')].join(' | ')+' |')" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: payeebook-web-build-${{ github.run_number }}
+          path: dist/
+          retention-days: 14
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.run_number }}
+          path: coverage/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  e2e:
+    name: End-to-end tests
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Run Playwright tests
+        run: npx playwright test --trace off
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_number }}
+          path: playwright-report/
+          retention-days: 14
+
+  desktop:
+    name: Desktop shell (Rust)
+    needs: check
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Download web build
+        uses: actions/download-artifact@v4
+        with:
+          name: payeebook-web-build-${{ github.run_number }}
+          path: dist/
+
+      - name: Format
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test
+        working-directory: src-tauri
+        run: cargo test --locked

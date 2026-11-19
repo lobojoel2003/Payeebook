@@ -1,0 +1,221 @@
+name: Release
+
+# Publishing a release:
+#   1. Bump the version:   npm version minor   (updates package.json, Cargo.toml, Cargo.lock)
+#   2. Move the "Unreleased" notes in CHANGELOG.md under the new version heading.
+#   3. Push the commit and the tag:   git push --follow-tags
+# Pushing a tag v*.*.* runs this workflow. It can also be started by hand from
+# the Actions tab with a version number; it then creates the tag itself.
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 1.0.0 (must match package.json and have a CHANGELOG section)'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  BUILD_NUMBER: ${{ github.run_number }}
+  BUILD_CHANNEL: release
+
+jobs:
+  prepare:
+    name: Verify, build web app, draft release
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      release_id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Work out the tag
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check the tag matches package.json, Cargo.toml and CHANGELOG.md
+        run: node scripts/sync-version.mjs --check --tag "${{ steps.meta.outputs.tag }}"
+
+      - name: Create the tag (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists at $(git rev-parse --short "$TAG")"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Payeebook $TAG"
+            git push origin "$TAG"
+          fi
+
+      - name: Lint, type check and test
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run templates:validate
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Package web app and template library
+        run: |
+          V="${{ steps.meta.outputs.version }}"
+          mkdir -p release
+          (cd dist && zip -qr "../release/payeebook-web-$V.zip" .)
+          (cd templates && zip -qr "../release/payeebook-templates-$V.zip" . -x '*.DS_Store')
+
+      - name: Write release notes
+        run: |
+          V="${{ steps.meta.outputs.version }}"
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          {
+            echo "**Payeebook $V** · build ${{ github.run_number }} · commit \`$SHORT_SHA\`"
+            echo
+            node scripts/release-notes.mjs "$V"
+            echo
+            echo "## Install"
+            echo
+            echo "| Platform | Download |"
+            echo "|---|---|"
+            echo "| Windows 10/11 | \`Payeebook_${V}_x64-setup.exe\` (or the \`.msi\`) |"
+            echo "| macOS 11+ (Apple silicon and Intel) | \`Payeebook_${V}_universal.dmg\` |"
+            echo "| Linux | \`.AppImage\`, \`.deb\` or \`.rpm\` |"
+            echo "| Any browser | Use the web app, or unzip \`payeebook-web-$V.zip\` onto any static host |"
+            echo
+            echo "The desktop apps are not code-signed yet. On macOS, right-click the app and choose **Open** the first time. On Windows, choose **More info → Run anyway**."
+            echo
+            echo "Verify downloads with \`SHA256SUMS.txt\`: \`sha256sum -c SHA256SUMS.txt --ignore-missing\`."
+            echo
+            echo "Form templates (\`payeebook-templates-$V.zip\`) are MIT licensed; the app is GPL-3.0-or-later."
+          } > release/notes.md
+          cat release/notes.md
+
+      - name: Create draft release
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: Payeebook ${{ steps.meta.outputs.tag }}
+          body_path: release/notes.md
+          draft: true
+          prerelease: ${{ contains(steps.meta.outputs.version, '-') }}
+          files: |
+            release/payeebook-web-${{ steps.meta.outputs.version }}.zip
+            release/payeebook-templates-${{ steps.meta.outputs.version }}.zip
+
+  desktop:
+    name: Desktop app (${{ matrix.name }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-22.04
+            args: ''
+          - name: Windows
+            os: windows-latest
+            args: ''
+          - name: macOS
+            os: macos-latest
+            args: '--target universal-apple-darwin'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Install system libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - name: Build and upload installers
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          tauriScript: npx tauri
+          args: ${{ matrix.args }}
+
+  publish:
+    name: Checksums and publish
+    needs: [prepare, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download release assets
+        run: |
+          mkdir -p assets
+          gh release download "$TAG" --dir assets --repo "$GITHUB_REPOSITORY"
+          ls -la assets
+
+      - name: Write SHA256SUMS.txt
+        run: |
+          cd assets
+          rm -f SHA256SUMS.txt
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release upload "$TAG" SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Publish the release
+        run: |
+          if [[ "$TAG" == *-* ]]; then
+            gh release edit "$TAG" --draft=false --prerelease --repo "$GITHUB_REPOSITORY"
+          else
+            gh release edit "$TAG" --draft=false --latest --repo "$GITHUB_REPOSITORY"
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,assets --jq '.url, (.assets[].name)'

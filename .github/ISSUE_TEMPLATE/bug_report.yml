@@ -1,0 +1,48 @@
+name: Bug report
+description: Something in Payeebook does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Do not include real names, account numbers, receipts, case numbers or Social Security numbers.** Reproduce the problem with the demo book or made-up numbers.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the demo book
+        2. Go to Reports
+        3. ...
+  - type: input
+    id: version
+    attributes:
+      label: Version and build
+      description: Settings → About shows it, e.g. "1.0.0 (build 42)"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where are you using Payeebook?
+      options:
+        - Web browser (computer)
+        - Web browser (phone or tablet)
+        - Installed web app (PWA)
+        - Windows desktop app
+        - macOS desktop app
+        - Linux desktop app
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and operating system
+      placeholder: e.g. Chrome 131 on Windows 11

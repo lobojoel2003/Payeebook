@@ -1,0 +1,73 @@
+name: Deploy web app
+
+# Publishes the web app to GitHub Pages on every push to main and for every
+# release. Enable it once in Settings → Pages → Source: "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      enabled: ${{ steps.pages.outcome == 'success' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check GitHub Pages is enabled
+        id: pages
+        uses: actions/configure-pages@v5
+        continue-on-error: true
+
+      - name: Explain how to enable Pages
+        if: steps.pages.outcome != 'success'
+        run: echo "::notice title=GitHub Pages is not enabled::Enable it in Settings → Pages → Build and deployment → Source → GitHub Actions, then re-run this workflow to publish the web app."
+
+      - uses: actions/setup-node@v5
+        if: steps.pages.outcome == 'success'
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Build
+        if: steps.pages.outcome == 'success'
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          BUILD_CHANNEL: web
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.pages.outcome == 'success'
+        with:
+          path: dist
+
+  deploy:
+    name: Deploy
+    needs: build
+    if: needs.build.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
