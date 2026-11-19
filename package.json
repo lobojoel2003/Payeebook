@@ -47,7 +47,7 @@
     "@tauri-apps/api": "^2.12.5",
     "@tauri-apps/plugin-opener": "^2.7.3",
     "idb-keyval": "^6.3.0",
-    "js-yaml": "^4.3.2",
+    "js-yaml": "^5.5.0",
     "lucide-react": "^1.76.0",
     "papaparse": "^5.7.1",
     "pdf-lib": "^1.17.1",
