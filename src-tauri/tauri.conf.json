@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Payeebook",
+  "version": "../package.json",
+  "identifier": "io.github.lobojoel2003.payeebook",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Payeebook",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 380,
+        "minHeight": 560,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Finance",
+    "publisher": "Payeebook contributors",
+    "copyright": "Copyright © 2026 Joel Stain Lobo and Payeebook contributors. GPL-3.0-or-later.",
+    "license": "GPL-3.0-or-later",
+    "shortDescription": "Accounts for representative payees, guardians and conservators",
+    "longDescription": "Payeebook keeps the books for someone whose money you manage: import bank files, snap receipts, tag each transaction once, and produce the SSA payee report or a court accounting. Everything stays on your computer.",
+    "homepage": "https://github.com/lobojoel2003/Payeebook",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "linux": {
+      "deb": { "section": "office" }
+    }
+  }
+}
