@@ -77,7 +77,7 @@ export function NewBookWizard({ onDone, onCancel }: { onDone: () => void; onCanc
               One book per person whose money you manage. You can add more books later.
             </p>
           </div>
-          <PeopleFields value={book} set={set} />
+          <PeopleFields value={book} set={set} autoFocus />
         </>
       )}
       {step === 1 && (

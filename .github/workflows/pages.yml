@@ -35,6 +35,10 @@ jobs:
         id: pages
         uses: actions/configure-pages@v5
         continue-on-error: true
+        with:
+          # Tries to switch Pages on (source: GitHub Actions). If the token is not
+          # allowed to, the build is skipped with a notice instead of failing.
+          enablement: true
 
       - name: Explain how to enable Pages
         if: steps.pages.outcome != 'success'

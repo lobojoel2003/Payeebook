@@ -90,14 +90,22 @@ export const EMPTY_BOOK: BookInput = {
 
 type Setter = (patch: Partial<BookInput>) => void;
 
-export function PeopleFields({ value, set }: { value: BookInput; set: Setter }) {
+export function PeopleFields({
+  value,
+  set,
+  autoFocus = false,
+}: {
+  value: BookInput;
+  set: Setter;
+  autoFocus?: boolean;
+}) {
   return (
     <div className="form-grid">
       <label className="field">
         <span>Whose money is it?</span>
         <input
           required
-          autoFocus
+          autoFocus={autoFocus}
           value={value.beneficiary_name}
           onChange={(e) => set({ beneficiary_name: e.target.value })}
           placeholder="Beneficiary’s full name"
