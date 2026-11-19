@@ -1,0 +1,76 @@
+# yaml-language-server: $schema=../schema.json
+# SPDX-License-Identifier: MIT
+schema: payeebook/template@1
+id: family-summary
+name: Family summary — where the money went
+short_name: Family summary
+version: 1.0.0
+kind: other
+status: generic
+jurisdiction:
+  country: US
+description: >-
+  A plain-language summary to share with siblings, the beneficiary or an
+  attorney: money in, money out by category, what was saved and what is left.
+  It is not a legal filing.
+period:
+  default: last-12-months
+inputs:
+  - id: message
+    label: A note to the family (optional)
+    type: textarea
+sections:
+  - id: overview
+    title: Overview
+    total: false
+    lines:
+      - { id: start, label: "Money on hand at the start", value: balance.start }
+      - { id: money_in, label: "Money in", value: totals.income }
+      - { id: money_out, label: "Money spent", value: totals.expense }
+      - { id: end, label: "Money on hand at the end", value: balance.end, emphasis: true }
+      - { id: saved_end, label: "Of which held in savings", value: balance.saved_end }
+      - { id: message, label: "Note", input: message }
+  - id: money_in
+    title: Money in
+    total: { label: Total money in }
+    lines:
+      - { id: ssa, label: "Social Security", sum: { categories: [benefits_ssa] } }
+      - { id: ssi, label: "SSI", sum: { categories: [benefits_ssi] } }
+      - { id: va, label: "VA benefits", sum: { categories: [benefits_va] } }
+      - { id: pension, label: "Pension or annuity", sum: { categories: [pension] } }
+      - { id: wages, label: "Earned income", sum: { categories: [wages] } }
+      - { id: interest, label: "Interest and dividends", sum: { categories: [interest] } }
+      - { id: refund, label: "Refunds and reimbursements", sum: { categories: [refund] } }
+      - { id: other, label: "Other money in", sum: { categories: [other_income] } }
+  - id: money_out
+    title: Money spent
+    total: { label: Total spent }
+    lines:
+      - { id: housing, label: "Housing", sum: { categories: [housing] } }
+      - { id: utilities, label: "Utilities", sum: { categories: [utilities] } }
+      - { id: care_facility, label: "Care facility", sum: { categories: [care_facility] } }
+      - { id: food, label: "Food", sum: { categories: [food] } }
+      - { id: medical, label: "Medical and dental", sum: { categories: [medical] } }
+      - { id: clothing, label: "Clothing", sum: { categories: [clothing] } }
+      - { id: personal, label: "Personal care and items", sum: { categories: [personal] } }
+      - { id: education, label: "Education", sum: { categories: [education] } }
+      - { id: recreation, label: "Recreation", sum: { categories: [recreation] } }
+      - { id: transportation, label: "Transportation", sum: { categories: [transportation] } }
+      - { id: insurance, label: "Insurance", sum: { categories: [insurance] } }
+      - { id: fees, label: "Bank, court and bond fees", sum: { categories: [fees] } }
+      - { id: legal, label: "Legal and professional", sum: { categories: [legal] } }
+      - { id: taxes, label: "Taxes", sum: { categories: [taxes] } }
+      - { id: debt, label: "Debt payments", sum: { categories: [debt] } }
+      - { id: other, label: "Other spending", sum: { categories: [other_expense] } }
+  - id: saving
+    title: Saved
+    total: false
+    lines:
+      - { id: moved, label: "Moved into savings this period", sum: { kinds: [saving] } }
+      - { id: untagged, label: "Not yet tagged (net)", value: totals.untagged }
+checks:
+  - label: Every transaction is tagged
+    assert: count.untagged == 0
+    severity: warning
+receipts:
+  attach: false

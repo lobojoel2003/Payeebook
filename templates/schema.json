@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/lobojoel2003/Payeebook/templates/schema.json",
+  "title": "Payeebook form template",
+  "description": "A report or court accounting form. See templates/README.md for a walkthrough.",
+  "type": "object",
+  "required": ["schema", "id", "name", "version", "kind", "status", "jurisdiction", "sections"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "payeebook/template@1" },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "description": "Unique id, e.g. us-mn-conservator-annual-account" },
+    "name": { "type": "string" },
+    "short_name": { "type": "string" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$" },
+    "kind": { "enum": ["ssa", "court", "va", "other"] },
+    "status": {
+      "enum": ["verified", "draft", "generic"],
+      "description": "verified: checked against the official form. draft: awaiting review. generic: not tied to one official form."
+    },
+    "jurisdiction": {
+      "type": "object",
+      "required": ["country"],
+      "additionalProperties": false,
+      "properties": {
+        "country": { "type": "string" },
+        "state": { "type": ["string", "null"], "description": "Two-letter state code" },
+        "county": { "type": ["string", "null"] },
+        "agency": { "type": "string" },
+        "court": { "type": "string" }
+      }
+    },
+    "roles": {
+      "type": "array",
+      "items": { "enum": ["ssa_payee", "ssi_payee", "va_fiduciary", "guardian", "conservator", "trustee", "other"] }
+    },
+    "description": { "type": "string" },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "url"],
+        "additionalProperties": false,
+        "properties": { "title": { "type": "string" }, "url": { "type": "string", "format": "uri" } }
+      }
+    },
+    "maintainers": { "type": "array", "items": { "type": "string" } },
+    "license": { "type": "string" },
+    "period": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default": { "enum": ["appointment-year", "calendar-year", "last-12-months", "custom"] },
+        "months": { "type": "integer", "minimum": 1, "maximum": 60 }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "type"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "label": { "type": "string" },
+          "type": { "enum": ["text", "textarea", "money", "number", "date", "yesno", "choice"] },
+          "help": { "type": "string" },
+          "default": { "type": ["string", "number", "boolean"] },
+          "required": { "type": "boolean" },
+          "options": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "lines"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "total": {
+            "oneOf": [
+              { "const": false },
+              { "type": "object", "required": ["label"], "additionalProperties": false, "properties": { "label": { "type": "string" } } }
+            ]
+          },
+          "itemize": {
+            "oneOf": [
+              { "type": "boolean" },
+              { "type": "object", "additionalProperties": false, "properties": { "min_amount": { "type": "number", "minimum": 0 } } }
+            ]
+          },
+          "lines": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/line" } }
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label", "assert"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "assert": { "type": "string" },
+          "severity": { "enum": ["error", "warning"] },
+          "help": { "type": "string" }
+        }
+      }
+    },
+    "notes": { "type": "array", "items": { "type": "string" } },
+    "attestation": { "type": "string" },
+    "signatures": { "type": "array", "items": { "type": "string" } },
+    "receipts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "attach": { "type": "boolean" }, "min_amount": { "type": "number", "minimum": 0 } }
+    },
+    "acroform": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fields": { "type": "object", "additionalProperties": { "type": "string" } },
+        "checkboxes": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "line": {
+      "type": "object",
+      "required": ["id", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id", "not": { "const": "total" } },
+        "label": { "type": "string" },
+        "sum": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "categories": { "type": "array", "items": { "type": "string" } },
+            "exclude": { "type": "array", "items": { "type": "string" } },
+            "kinds": { "type": "array", "items": { "enum": ["income", "expense", "transfer", "saving"] } },
+            "ssa": { "type": "array", "items": { "enum": ["benefits", "other_income", "food_housing", "other_needs", "saved", "none"] } },
+            "court": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "receipts.benefits", "receipts.pension", "receipts.earned", "receipts.investment", "receipts.other",
+                  "disbursements.residence", "disbursements.food", "disbursements.medical", "disbursements.personal",
+                  "disbursements.transport", "disbursements.insurance", "disbursements.administration",
+                  "disbursements.debt", "disbursements.other", "transfers", "savings"
+                ]
+              }
+            },
+            "accounts": { "type": "array", "items": { "enum": ["checking", "savings", "cash", "prepaid", "investment", "other"] } },
+            "direction": { "enum": ["in", "out"] },
+            "untagged": { "type": "boolean" }
+          }
+        },
+        "value": { "type": "string", "description": "Expression, e.g. receipts.total - disbursements.total" },
+        "input": { "type": "string" },
+        "text": { "type": "string" },
+        "format": { "enum": ["money", "number", "text", "date", "yesno"] },
+        "help": { "type": "string" },
+        "emphasis": { "type": "boolean" },
+        "in_total": { "type": "boolean" }
+      },
+      "oneOf": [
+        { "required": ["sum"] },
+        { "required": ["value"] },
+        { "required": ["input"] },
+        { "required": ["text"] }
+      ]
+    }
+  }
+}

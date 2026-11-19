@@ -1,0 +1,171 @@
+# yaml-language-server: $schema=../../schema.json
+# SPDX-License-Identifier: MIT
+schema: payeebook/template@1
+id: us-generic-annual-account
+name: Annual account of guardian or conservator (standard schedules)
+short_name: Annual account
+version: 1.0.0
+kind: court
+status: generic
+jurisdiction:
+  country: US
+roles: [guardian, conservator, trustee]
+description: >-
+  A standard "charge and discharge" account: what the estate held at the start
+  of the period, what came in, what went out, and what is left. Probate courts
+  across the US ask for these schedules in some form. Use it where your court
+  accepts a standard account, or as the worksheet for your court's own form.
+references:
+  - title: Illinois 22nd Circuit — Guardianship Accounting Program
+    url: https://www.22ndcircuitil.gov/guardianship-accounting-program/
+maintainers: [payeebook]
+license: MIT
+period:
+  default: appointment-year
+inputs:
+  - id: case_number
+    label: Court case number
+    type: text
+    default: "{{ book.case_number }}"
+    required: true
+  - id: court
+    label: Court
+    type: text
+    default: "{{ book.court }}"
+  - id: account_number
+    label: Which account is this?
+    type: choice
+    options: [First annual account, Second annual account, Third annual account, Later annual account, Final account]
+  - id: non_cash_assets
+    label: Value of property not tracked in Payeebook (real estate, vehicles, investments)
+    type: money
+    default: 0
+  - id: non_cash_description
+    label: Describe that property
+    type: textarea
+  - id: fiduciary_fees
+    label: Did you pay yourself any fees or compensation in this period?
+    type: yesno
+    default: false
+    help: Most courts require approval before a guardian or conservator is paid from the estate.
+
+sections:
+  - id: summary
+    title: Summary of account
+    total: false
+    lines:
+      - id: opening
+        label: Cash and savings on hand at the start of the period (Schedule A)
+        value: balance.start
+      - id: receipts
+        label: Add receipts during the period (Schedule B)
+        value: receipts.total
+      - id: charges
+        label: Total to account for
+        value: summary.opening + summary.receipts
+        emphasis: true
+      - id: disbursements
+        label: Subtract disbursements during the period (Schedule C)
+        value: disbursements.total
+      - id: closing
+        label: Cash and savings on hand at the end of the period (Schedule D)
+        value: balance.end
+        emphasis: true
+      - id: non_cash
+        label: Other property held, reported separately
+        input: non_cash_assets
+
+  - id: schedule_a
+    title: Schedule A — Assets on hand at the start of the period
+    total: false
+    lines:
+      - id: accounts
+        label: Bank, cash and prepaid accounts
+        value: balance.accounts_start
+      - id: saved_elsewhere
+        label: Savings held outside those accounts (CDs, savings bonds)
+        value: balance.start - balance.accounts_start
+      - id: start_total
+        label: Total cash and savings at start
+        value: balance.start
+        emphasis: true
+        in_total: false
+
+  - id: receipts
+    title: Schedule B — Receipts
+    itemize: true
+    total: { label: Total receipts }
+    lines:
+      - { id: benefits, label: "Government benefits (Social Security, SSI, VA)", sum: { court: [receipts.benefits] } }
+      - { id: pension, label: "Pensions and annuities", sum: { court: [receipts.pension] } }
+      - { id: earned, label: "Earned income", sum: { court: [receipts.earned] } }
+      - { id: investment, label: "Interest and dividends", sum: { court: [receipts.investment] } }
+      - { id: other, label: "Other receipts (refunds, reimbursements, gifts)", sum: { court: [receipts.other] } }
+
+  - id: disbursements
+    title: Schedule C — Disbursements
+    itemize: true
+    total: { label: Total disbursements }
+    lines:
+      - { id: residence, label: "Residence and care (rent, utilities, care facility)", sum: { court: [disbursements.residence] } }
+      - { id: food, label: "Food", sum: { court: [disbursements.food] } }
+      - { id: medical, label: "Medical and dental", sum: { court: [disbursements.medical] } }
+      - { id: personal, label: "Clothing, personal needs, education and recreation", sum: { court: [disbursements.personal] } }
+      - { id: transport, label: "Transportation", sum: { court: [disbursements.transport] } }
+      - { id: insurance, label: "Insurance", sum: { court: [disbursements.insurance] } }
+      - { id: administration, label: "Administration (bank and court fees, bond, legal, taxes)", sum: { court: [disbursements.administration] } }
+      - { id: debt, label: "Debt payments", sum: { court: [disbursements.debt] } }
+      - { id: other, label: "Other disbursements", sum: { court: [disbursements.other] } }
+
+  - id: schedule_d
+    title: Schedule D — Assets on hand at the end of the period
+    total: false
+    lines:
+      - id: accounts
+        label: Bank, cash and prepaid accounts
+        value: balance.accounts_end
+      - id: saved_elsewhere
+        label: Savings held outside those accounts (CDs, savings bonds)
+        value: balance.end - balance.accounts_end
+      - id: end_total
+        label: Total cash and savings at end
+        value: balance.end
+        emphasis: true
+
+  - id: movements
+    title: Money moved between the estate's own accounts
+    description: These are not receipts or disbursements; they are listed so the bank statements can be traced.
+    total: false
+    lines:
+      - id: saved
+        label: Moved into savings held outside tracked accounts
+        sum: { kinds: [saving] }
+      - id: transfers
+        label: Net of transfers between tracked accounts (should be zero)
+        value: totals.transfers
+
+checks:
+  - label: Start + receipts − disbursements = end
+    assert: summary.opening + receipts.total - disbursements.total == summary.closing
+    help: If this fails, look for untagged transactions or a transfer recorded on only one side.
+  - label: Every transaction in the period is tagged
+    assert: count.untagged == 0
+    severity: warning
+  - label: Transfers between tracked accounts net to zero
+    assert: totals.transfers == 0
+    severity: warning
+    help: Record both sides of a transfer, or tag money leaving for an untracked savings account as "Saved".
+
+notes:
+  - Many courts also require copies of bank statements for the first and last month of the period. Check your court's local rules.
+  - Fees paid to yourself as guardian or conservator usually need court approval first.
+
+attestation: >-
+  I, {{ book.fiduciary_name }}, guardian or conservator of the estate of
+  {{ book.beneficiary_name }}, state that this account for
+  {{ period.start | date }} through {{ period.end | date }} is true, correct
+  and complete to the best of my knowledge, and that it includes all money
+  and property of the estate that came into my hands during this period.
+signatures: [Guardian or conservator, Date, Attorney for guardian (if any)]
+receipts:
+  attach: true

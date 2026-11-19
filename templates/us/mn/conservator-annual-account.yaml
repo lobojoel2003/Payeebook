@@ -1,0 +1,99 @@
+# yaml-language-server: $schema=../../schema.json
+# SPDX-License-Identifier: MIT
+schema: payeebook/template@1
+id: us-mn-conservator-annual-account
+name: Minnesota — Conservator's annual account (community draft)
+short_name: MN conservator account
+version: 0.1.0
+kind: court
+status: draft
+jurisdiction:
+  country: US
+  state: MN
+roles: [conservator]
+description: >-
+  Worksheet for the conservator's annual account in Minnesota. Minnesota
+  conservators file accounts online through MyMNConservator; this template
+  gathers the same totals (starting assets, income, expenses, ending assets)
+  so they can be typed in, and produces itemized pages and receipts to keep.
+references:
+  - title: Minn. Stat. § 524.5-420 — Conservator reports and accounts
+    url: https://www.revisor.mn.gov/statutes/cite/524.5-420
+maintainers: [payeebook]
+license: MIT
+period:
+  default: appointment-year
+inputs:
+  - id: case_number
+    label: Court file number
+    type: text
+    default: "{{ book.case_number }}"
+    required: true
+  - id: county
+    label: County
+    type: text
+    default: "{{ book.county }}"
+  - id: non_cash_assets
+    label: Value of real estate, vehicles and investments (not tracked in Payeebook)
+    type: money
+    default: 0
+  - id: compensation
+    label: Conservator compensation paid this period (if approved by the court)
+    type: money
+    default: 0
+sections:
+  - id: summary
+    title: Account summary
+    total: false
+    lines:
+      - { id: beginning, label: "Beginning cash balance", value: balance.start }
+      - { id: income, label: "Income", value: income.total }
+      - { id: expenses, label: "Expenses", value: expenses.total }
+      - { id: ending, label: "Ending cash balance", value: balance.end, emphasis: true }
+      - { id: non_cash, label: "Non-cash assets", input: non_cash_assets }
+      - { id: estate_total, label: "Total estate value", value: balance.end + inputs.non_cash_assets, emphasis: true }
+  - id: income
+    title: Income
+    itemize: true
+    total: { label: Total income }
+    lines:
+      - { id: ssa, label: "Social Security and SSI", sum: { categories: [benefits_ssa, benefits_ssi] } }
+      - { id: va, label: "Veterans benefits", sum: { categories: [benefits_va] } }
+      - { id: pension, label: "Pension and annuity", sum: { court: [receipts.pension] } }
+      - { id: earned, label: "Wages", sum: { court: [receipts.earned] } }
+      - { id: investment, label: "Interest and dividends", sum: { court: [receipts.investment] } }
+      - { id: other, label: "Other income", sum: { court: [receipts.other] } }
+  - id: expenses
+    title: Expenses
+    itemize: true
+    total: { label: Total expenses }
+    lines:
+      - { id: housing, label: "Housing and utilities", sum: { categories: [housing, utilities] } }
+      - { id: facility, label: "Nursing home or residential care", sum: { categories: [care_facility] } }
+      - { id: food, label: "Food", sum: { court: [disbursements.food] } }
+      - { id: medical, label: "Medical and dental", sum: { court: [disbursements.medical] } }
+      - { id: personal, label: "Clothing and personal", sum: { court: [disbursements.personal] } }
+      - { id: transport, label: "Transportation", sum: { court: [disbursements.transport] } }
+      - { id: insurance, label: "Insurance", sum: { court: [disbursements.insurance] } }
+      - { id: admin, label: "Fees, legal and taxes", sum: { court: [disbursements.administration] } }
+      - { id: debt, label: "Debt payments", sum: { court: [disbursements.debt] } }
+      - { id: other, label: "Other expenses", sum: { court: [disbursements.other] } }
+checks:
+  - label: Beginning + income − expenses = ending
+    assert: summary.beginning + income.total - expenses.total == summary.ending
+  - label: Every transaction in the period is tagged
+    assert: count.untagged == 0
+    severity: warning
+  - label: Compensation entered matches fees recorded
+    assert: inputs.compensation == 0 || inputs.compensation <= expenses.admin
+    severity: warning
+    help: Record conservator compensation as "Bank, court and bond fees" or "Legal and professional".
+notes:
+  - "Community draft: compare these totals with the screens in MyMNConservator before filing, and open an issue with any differences."
+attestation: >-
+  I, {{ book.fiduciary_name }}, conservator for {{ book.beneficiary_name }},
+  certify that this account for {{ period.start | date }} through
+  {{ period.end | date }} is accurate to the best of my knowledge.
+signatures: [Conservator, Date]
+receipts:
+  attach: true

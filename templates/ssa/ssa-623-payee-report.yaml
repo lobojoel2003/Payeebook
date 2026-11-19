@@ -1,0 +1,130 @@
+# yaml-language-server: $schema=../schema.json
+# SPDX-License-Identifier: MIT
+schema: payeebook/template@1
+id: ssa-623-payee-report
+name: Representative Payee Report worksheet (SSA-623 / SSA-6230)
+short_name: SSA-623
+version: 1.0.0
+kind: ssa
+status: draft
+jurisdiction:
+  country: US
+  agency: Social Security Administration
+roles: [ssa_payee, ssi_payee]
+description: >-
+  Totals for the annual Representative Payee Report that SSA mails to payees
+  (SSA-623 for adult beneficiaries, SSA-6230 for children). Copy the figures
+  into the paper form or the online report, and keep the itemized pages and
+  receipts with your records in case SSA asks to see them.
+references:
+  - title: SSA — Representative payee program
+    url: https://www.ssa.gov/payee/index.htm
+  - title: True Link — Keeping representative payee records audit-ready
+    url: https://www.truelinkfinancial.com/blog/tips-keep-records-audit-ready-rep-payee
+maintainers: [payeebook]
+license: MIT
+period:
+  default: last-12-months
+inputs:
+  - id: lived_with
+    label: Where did the beneficiary live for most of the period?
+    type: choice
+    options:
+      - With me (the payee)
+      - Alone, or with someone other than me
+      - Nursing home or other care facility
+      - Group home
+      - Other
+  - id: moved
+    label: Did the beneficiary move during the period?
+    type: yesno
+    default: false
+  - id: notes
+    label: Notes to keep with this report
+    type: textarea
+    help: For example, why spending was higher than benefits in a month, or a large one-time purchase.
+sections:
+  - id: received
+    title: Benefits received
+    total: false
+    lines:
+      - id: benefits
+        label: Social Security and SSI benefits you received for the beneficiary
+        sum: { ssa: [benefits] }
+        emphasis: true
+
+  - id: used
+    title: How the benefits were used
+    itemize: true
+    total: { label: Total spent on the beneficiary }
+    lines:
+      - id: food_housing
+        label: Food and housing (rent or mortgage, utilities, groceries, room and board)
+        sum: { ssa: [food_housing] }
+      - id: other_needs
+        label: Clothing, education, medical and dental care, personal items, recreation and miscellaneous
+        sum: { ssa: [other_needs] }
+
+  - id: saved
+    title: Saved
+    total: false
+    lines:
+      - id: saved
+        label: Benefits saved during the period (received minus spent)
+        value: max(0, received.benefits - used.total)
+        emphasis: true
+      - id: moved_to_savings
+        label: Of this, moved into savings, CDs or savings bonds
+        sum: { ssa: [saved] }
+        in_total: false
+      - id: savings_on_hand
+        label: Saved funds held for the beneficiary at the end of the period, including interest
+        value: balance.saved_end
+      - id: all_funds_on_hand
+        label: All of the beneficiary's money you held at the end of the period
+        value: balance.end
+
+  - id: other_money
+    title: Other money (for your records)
+    description: SSA asks how its benefits were used. These lines help explain spending paid from other sources.
+    total: false
+    lines:
+      - id: other_income
+        label: Other income received for the beneficiary (pension, wages, VA, interest)
+        sum: { ssa: [other_income] }
+      - id: spent_beyond_benefits
+        label: Spending paid from other funds (spending above benefits received)
+        value: max(0, used.total - received.benefits)
+      - id: lived_with
+        label: Where the beneficiary lived
+        input: lived_with
+      - id: moved
+        label: Moved during the period
+        input: moved
+
+checks:
+  - label: Amount spent plus amount saved equals benefits received
+    assert: used.total + saved.saved == received.benefits || used.total > received.benefits
+  - label: Every transaction in the period is tagged
+    assert: count.untagged == 0
+    severity: warning
+    help: Untagged transactions are left out of every total. Tag them on the Transactions page.
+  - label: Spending stayed within benefits received
+    assert: used.total <= received.benefits
+    severity: warning
+    help: If other income paid for some needs, keep records that show where that money came from.
+
+notes:
+  - Report only how Social Security or SSI benefits were used. Payeebook counts the benefits you received, what was spent, and treats the rest as saved.
+  - Keep receipts and bank statements for at least two years after you file. SSA can ask to see them.
+  - Some family payees who live with the beneficiary (for example some parents and spouses) no longer have to file this report. If SSA did not send you a form, check with SSA before filing.
+  - "This is a community draft. Compare the line wording with the form SSA sent you; if anything differs, please open an issue so the template can be corrected."
+
+attestation: >-
+  Prepared by {{ book.fiduciary_name }}, representative payee for
+  {{ book.beneficiary_name }}, for {{ period.start | date }} through
+  {{ period.end | date }}. The figures come from the payee ledger kept in
+  Payeebook. The itemized pages and receipts that follow support them.
+signatures: [Representative payee, Date]
+receipts:
+  attach: true

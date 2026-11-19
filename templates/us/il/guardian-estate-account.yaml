@@ -1,0 +1,116 @@
+# yaml-language-server: $schema=../../schema.json
+# SPDX-License-Identifier: MIT
+schema: payeebook/template@1
+id: us-il-guardian-estate-account
+name: Illinois — Account of guardian of the estate (community draft)
+short_name: IL guardian account
+version: 0.1.0
+kind: court
+status: draft
+jurisdiction:
+  country: US
+  state: IL
+roles: [guardian]
+description: >-
+  Annual or final account for a guardian of the estate of an adult with a
+  disability or a minor in Illinois. Counties publish their own forms and
+  local rules, so treat this as the worksheet behind your county's form. The
+  22nd Judicial Circuit runs a Guardianship Accounting Program that reviews
+  accounts before they reach the judge.
+references:
+  - title: 755 ILCS 5/24-11 — Accounts (Illinois Probate Act)
+    url: https://www.ilga.gov/legislation/ilcs/fulltext.asp?DocName=075500050K24-11
+  - title: Illinois 22nd Circuit — Guardianship Accounting Program
+    url: https://www.22ndcircuitil.gov/guardianship-accounting-program/
+maintainers: [payeebook]
+license: MIT
+period:
+  default: appointment-year
+inputs:
+  - id: case_number
+    label: Case number
+    type: text
+    default: "{{ book.case_number }}"
+    required: true
+  - id: county
+    label: County
+    type: text
+    default: "{{ book.county }}"
+  - id: account_type
+    label: Account type
+    type: choice
+    options: [Annual account, Final account, Supplemental account]
+  - id: ward_residence
+    label: Where does the ward live?
+    type: text
+  - id: real_estate
+    label: Value of real estate held (not tracked in Payeebook)
+    type: money
+    default: 0
+  - id: bond_amount
+    label: Amount of the guardian's surety bond
+    type: money
+    default: 0
+sections:
+  - id: summary
+    title: Summary
+    total: false
+    lines:
+      - { id: opening, label: "Personal estate on hand at start of period", value: balance.start }
+      - { id: receipts, label: "Receipts (Exhibit A)", value: receipts.total }
+      - { id: disbursements, label: "Disbursements (Exhibit B)", value: disbursements.total }
+      - { id: closing, label: "Personal estate on hand at end of period (Exhibit C)", value: balance.end, emphasis: true }
+      - { id: real_estate, label: "Real estate held", input: real_estate }
+      - { id: bond, label: "Surety bond amount", input: bond_amount }
+  - id: receipts
+    title: Exhibit A — Receipts
+    itemize: true
+    total: { label: Total receipts }
+    lines:
+      - { id: benefits, label: "Social Security, SSI and other government benefits", sum: { court: [receipts.benefits] } }
+      - { id: pension, label: "Pension and annuity income", sum: { court: [receipts.pension] } }
+      - { id: earned, label: "Wages and earnings", sum: { court: [receipts.earned] } }
+      - { id: investment, label: "Interest and dividends", sum: { court: [receipts.investment] } }
+      - { id: other, label: "All other receipts", sum: { court: [receipts.other] } }
+  - id: disbursements
+    title: Exhibit B — Disbursements
+    itemize: true
+    total: { label: Total disbursements }
+    lines:
+      - { id: residence, label: "Residence, room and board, utilities", sum: { court: [disbursements.residence] } }
+      - { id: food, label: "Food", sum: { court: [disbursements.food] } }
+      - { id: medical, label: "Medical, dental and pharmacy", sum: { court: [disbursements.medical] } }
+      - { id: personal, label: "Clothing and personal needs of the ward", sum: { court: [disbursements.personal] } }
+      - { id: transport, label: "Transportation", sum: { court: [disbursements.transport] } }
+      - { id: insurance, label: "Insurance premiums", sum: { court: [disbursements.insurance] } }
+      - { id: administration, label: "Court costs, bond premium, attorney and bank fees", sum: { court: [disbursements.administration] } }
+      - { id: debt, label: "Debts of the ward", sum: { court: [disbursements.debt] } }
+      - { id: other, label: "Other disbursements", sum: { court: [disbursements.other] } }
+  - id: on_hand
+    title: Exhibit C — Personal estate on hand at end of period
+    total: false
+    lines:
+      - { id: accounts, label: "Bank and cash accounts", value: balance.accounts_end }
+      - { id: saved_elsewhere, label: "CDs, savings bonds and other savings", value: balance.end - balance.accounts_end }
+      - { id: end_total, label: "Total personal estate on hand", value: balance.end, emphasis: true }
+checks:
+  - label: Start + receipts − disbursements = end
+    assert: summary.opening + receipts.total - disbursements.total == summary.closing
+  - label: Every transaction in the period is tagged
+    assert: count.untagged == 0
+    severity: warning
+  - label: Estate on hand does not exceed the bond (check with the court if it does)
+    assert: inputs.bond_amount == 0 || balance.end <= inputs.bond_amount
+    severity: warning
+    help: Courts often require the bond to cover the personal estate. Ask your attorney whether it must be increased.
+notes:
+  - "Community draft: compare every line with your county's current form and local rules before filing, then open an issue or pull request with corrections."
+  - Attach copies of bank statements if your county requires them.
+attestation: >-
+  I, {{ book.fiduciary_name }}, guardian of the estate of
+  {{ book.beneficiary_name }}, case {{ inputs.case_number }}, state that this
+  account for {{ period.start | date }} through {{ period.end | date }} is a
+  true and complete account of my administration of the estate.
+signatures: [Guardian of the estate, Date, Attorney for guardian (if any)]
+receipts:
+  attach: true
