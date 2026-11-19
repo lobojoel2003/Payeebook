@@ -183,6 +183,8 @@ and Payeebook writes into its fields:
 acroform:
   fields:
     'Total Receipts': receipts.total # numbers are written as 1,234.56
+    'Number of items': count.transactions # counts and days are written as plain numbers
+    'Period ends': period.end | date # optional filters: money, number, date, yesno, text
     'Case No': '{{ inputs.case_number }}' # text with placeholders
   checkboxes:
     'Lived at home': inputs.lived_with == "At home"

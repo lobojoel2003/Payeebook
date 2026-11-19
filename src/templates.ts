@@ -2,7 +2,7 @@ import {
   addDays,
   addMonths,
   addYears,
-  periodEndFor,
+  startOfMonth,
   toISO,
   todayISO,
   type ISODate,
@@ -82,16 +82,25 @@ export function suggestedFor(t: FormTemplate, book: Book): number {
   return score;
 }
 
-/** The most recent 12-month period starting in `month` (1-12) that has ended, or the current one. */
-function periodFromMonth(
-  month: number,
-  day: number,
-  today: ISODate,
-): { start: ISODate; end: ISODate } {
-  const year = Number(today.slice(0, 4));
-  let start = toISO(year, month, Math.min(day, 28));
-  while (periodEndFor(start) >= today) start = addYears(start, -1);
-  return { start, end: periodEndFor(start) };
+/**
+ * Reporting years run between anniversaries of an anchor date: from
+ * anchor + n years to the day before anchor + (n + 1) years. Computing every
+ * year from the original anchor keeps consecutive periods contiguous, even for
+ * appointments on the 29th, 30th or 31st.
+ */
+function anniversaryYears(anchor: ISODate, today: ISODate) {
+  const startOf = (n: number) => addYears(anchor, n);
+  let n = Math.max(0, Number(today.slice(0, 4)) - Number(anchor.slice(0, 4)) - 1);
+  while (startOf(n + 1) <= today) n++;
+  while (n > 0 && startOf(n) > today) n--;
+  const current = { start: startOf(n), end: addDays(startOf(n + 1), -1) };
+  const completed = n > 0 ? { start: startOf(n - 1), end: addDays(startOf(n), -1) } : null;
+  return { current, completed };
+}
+
+function anchorFor(book: Book): ISODate {
+  if (book.report_month) return toISO(2000, book.report_month, 1);
+  return book.appointment_date ?? toISO(2000, 1, 1);
 }
 
 export function defaultPeriod(
@@ -105,16 +114,17 @@ export function defaultPeriod(
     return { start: toISO(y, 1, 1), end: toISO(y, 12, 31) };
   }
   if (kind === 'appointment-year' && book.appointment_date) {
-    const [, m, d] = book.appointment_date.split('-').map(Number);
-    const p = periodFromMonth(m, d, today);
-    // Not a full year since appointment yet: use the year in progress.
-    if (p.start < book.appointment_date)
-      return { start: book.appointment_date, end: periodEndFor(book.appointment_date) };
-    return p;
+    // The last full year since appointment, or the year in progress if none has ended.
+    const { current, completed } = anniversaryYears(book.appointment_date, today);
+    return completed ?? current;
   }
-  if (book.report_month) return periodFromMonth(book.report_month, 1, today);
-  const end = addDays(toISO(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 1), -1);
-  return { start: addDays(addMonths(end, -12), 1), end };
+  if (book.report_month) {
+    const { current, completed } = anniversaryYears(anchorFor(book), today);
+    return completed ?? current;
+  }
+  // The 12 whole calendar months before this one.
+  const end = addDays(startOfMonth(today), -1);
+  return { start: startOfMonth(addMonths(startOfMonth(end), -11)), end };
 }
 
 /** The reporting year that contains today, for the dashboard. */
@@ -122,15 +132,5 @@ export function currentReportingYear(
   book: Book,
   today: ISODate = todayISO(),
 ): { start: ISODate; end: ISODate } {
-  const month =
-    book.report_month ?? (book.appointment_date ? Number(book.appointment_date.slice(5, 7)) : 1);
-  const day = book.report_month
-    ? 1
-    : book.appointment_date
-      ? Number(book.appointment_date.slice(8, 10))
-      : 1;
-  const year = Number(today.slice(0, 4));
-  let start = toISO(year, month, Math.min(day, 28));
-  if (start > today) start = addYears(start, -1);
-  return { start, end: periodEndFor(start) };
+  return anniversaryYears(anchorFor(book), today).current;
 }

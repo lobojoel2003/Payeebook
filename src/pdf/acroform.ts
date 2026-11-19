@@ -1,6 +1,6 @@
 import { PDFCheckBox, PDFDocument, PDFDropdown, PDFRadioGroup, PDFTextField } from 'pdf-lib';
 import { acroValue, TemplateEvaluator } from '../core/templates/evaluate';
-import { evalExpr } from '../core/templates/expr';
+import { evalExpr, truthy } from '../core/templates/expr';
 import { winAnsi } from './text';
 
 export interface FormField {
@@ -80,7 +80,7 @@ export async function fillAcroForm(
       continue;
     }
     try {
-      const on = Boolean(evalExpr(spec, evaluator.resolve));
+      const on = truthy(evalExpr(spec, evaluator.resolve));
       const box = form.getCheckBox(field);
       if (on) box.check();
       else box.uncheck();

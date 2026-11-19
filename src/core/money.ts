@@ -84,10 +84,12 @@ export function parseMoney(input: string | number | null | undefined): Cents | n
   if (lastComma > -1 && lastDot > -1) {
     normalized = lastComma > lastDot ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
   } else if (lastComma > -1) {
-    // "1,234" is thousands; "12,34" is a European decimal.
+    // "1,234" is thousands; "12,34" and "12,5" are European decimals.
     const decimals = s.length - lastComma - 1;
     normalized =
-      decimals === 2 && s.indexOf(',') === lastComma ? s.replace(',', '.') : s.replace(/,/g, '');
+      (decimals === 1 || decimals === 2) && s.indexOf(',') === lastComma
+        ? s.replace(',', '.')
+        : s.replace(/,/g, '');
   } else {
     normalized = s;
   }

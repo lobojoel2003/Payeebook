@@ -240,10 +240,11 @@ export function applyMapping(rows: string[][], mapping: CsvMapping): ParsedRow[]
         mapping.credit !== undefined && mapping.credit >= 0
           ? parseMoney(r[mapping.credit] ?? '')
           : null;
-      if (debit !== null || credit !== null)
-        amount = (credit ? Math.abs(credit) : 0) - (debit ? Math.abs(debit) : 0);
+      // Debits are money out whatever their sign; a negative credit is a reversal.
+      if (debit !== null || credit !== null) amount = (credit ?? 0) - (debit ? Math.abs(debit) : 0);
     }
     if (amount === null) errors.push('No amount');
+    else if (amount === 0) errors.push('Amount is zero');
     else if (mapping.invert) amount = -amount;
 
     const description = (r[mapping.description] ?? '').replace(/\s+/g, ' ').trim();

@@ -343,7 +343,11 @@ export function validateTemplate(raw: unknown, extraCategoryIds: string[] = []):
           if (typeof spec !== 'string')
             err(`acroform.${key}.${field}`, 'Field mappings must be text.');
           else if (spec.includes('{{')) texts.push({ path: `acroform.${key}.${field}`, src: spec });
-          else exprs.push({ path: `acroform.${key}.${field}`, src: spec });
+          else
+            exprs.push({
+              path: `acroform.${key}.${field}`,
+              src: spec.replace(/\s*\|\s*(money|number|date|yesno|text)\s*$/, ''),
+            });
         }
       }
   }

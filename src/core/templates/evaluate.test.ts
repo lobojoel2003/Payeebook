@@ -150,7 +150,8 @@ describe('template evaluation', () => {
     const disb = r.sections.find((s) => s.id === 'disbursements')!;
     const other = disb.itemized!.find((g) => g.lineId === 'other')!;
     expect(other.items).toHaveLength(0);
-    expect(other.rolledUp).toEqual({ count: 2, amount: 1300 });
+    // The refund reduces the rolled-up amount, so it agrees with the line total.
+    expect(other.rolledUp).toEqual({ count: 2, amount: 700 });
     const fh = disb.itemized!.find((g) => g.lineId === 'food_housing')!;
     expect(fh.items.map((i) => i.amount)).toEqual([-85000, -5420]);
   });

@@ -88,7 +88,14 @@ export function extractBook(SQL: SqlJsStatic, source: Store, bookId: string): Ui
     copy.run('DELETE FROM books WHERE id <> ?', [bookId]);
     copy.run('DELETE FROM audit_log WHERE book_id <> ?', [bookId]);
     copy.run('DELETE FROM import_profiles');
-    copy.run("DELETE FROM meta WHERE key NOT IN ('schema_version', 'created_at')");
+    // Custom templates are shared by every book on the device: keep only the ones this book used.
+    copy.run(
+      'DELETE FROM user_templates WHERE id NOT IN (SELECT template_id FROM reports WHERE book_id = ?)',
+      [bookId],
+    );
+    copy.run("DELETE FROM meta WHERE key NOT IN ('schema_version', 'created_at', ?)", [
+      `audit_head:${bookId}`,
+    ]);
     copy.run('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)', ['active_book', bookId]);
     copy.run('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)', ['snapshot_of', bookId]);
     copy.exec('VACUUM');

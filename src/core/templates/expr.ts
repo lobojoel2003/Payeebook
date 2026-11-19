@@ -189,7 +189,7 @@ function num(v: Value): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function truthy(v: Value): boolean {
+export function truthy(v: Value): boolean {
   if (typeof v === 'string') return v !== '' && v.toLowerCase() !== 'no' && v !== 'false';
   return Boolean(v);
 }
@@ -250,6 +250,17 @@ export function evaluate(node: Node, resolve: (name: string) => Value): Value {
             ? String(av ?? '') === String(bv ?? '')
             : num(av) === num(bv);
         return node.op === '==' ? eq : !eq;
+      }
+      // Two strings (for example ISO dates) compare as text.
+      if (
+        typeof av === 'string' &&
+        typeof bv === 'string' &&
+        ['<', '<=', '>', '>='].includes(node.op)
+      ) {
+        if (node.op === '<') return av < bv;
+        if (node.op === '<=') return av <= bv;
+        if (node.op === '>') return av > bv;
+        return av >= bv;
       }
       const a = num(av);
       const b = num(bv);

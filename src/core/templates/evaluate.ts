@@ -25,6 +25,8 @@ export interface EvalLine {
   accountName: string;
   accountKind: AccountKind;
   receiptIds: string[];
+  /** The whole transaction's amount (differs from `amount` for split lines). */
+  txAmount?: number;
 }
 
 export interface EvalAccount {
@@ -106,7 +108,8 @@ export interface ReportResult {
 
 export function lineMatches(spec: SumSpec, line: EvalLine, cats: CategoryIndex): boolean {
   const cat = cats.get(line.category);
-  if (spec.untagged) return !line.category;
+  // A tag that no longer exists counts as untagged, so it can never vanish from every total.
+  if (spec.untagged) return !cat;
   if (!cat) return false;
   if (spec.exclude?.includes(cat.id)) return false;
   if (spec.accounts && !spec.accounts.includes(line.accountKind)) return false;
@@ -130,12 +133,17 @@ export function sumLines(
   const items: EvalLine[] = [];
   for (const l of lines) {
     if (!lineMatches(spec, l, cats)) continue;
-    const cat = cats.get(l.category);
-    const sign = spec.untagged || !cat ? (l.amount < 0 ? -1 : 1) : reportSign(cat.kind);
-    total += l.amount * sign;
+    total += contribution(l, cats, Boolean(spec.untagged));
     items.push(l);
   }
   return { total, items };
+}
+
+/** How much one ledger line adds to a sum line, with the sum's polarity. */
+export function contribution(line: EvalLine, cats: CategoryIndex, untagged = false): number {
+  const cat = cats.get(line.category);
+  const sign = untagged || !cat ? (line.amount < 0 ? -1 : 1) : reportSign(cat.kind);
+  return line.amount * sign;
 }
 
 export function formatValue(v: Value, format: LineFormat): string {
@@ -370,12 +378,19 @@ export class TemplateEvaluator {
               .filter((i) => Math.abs(i.amount) >= min)
               .sort((a, b) => a.date.localeCompare(b.date));
             const small = l.items.filter((i) => Math.abs(i.amount) < min);
+            const untaggedLine = Boolean(section.lines.find((x) => x.id === l.id)?.sum?.untagged);
             return {
               lineId: l.id,
               label: l.label,
               items: big,
               rolledUp: small.length
-                ? { count: small.length, amount: small.reduce((n, i) => n + Math.abs(i.amount), 0) }
+                ? {
+                    count: small.length,
+                    amount: small.reduce(
+                      (n, i) => n + contribution(i, ctx.categories, untaggedLine),
+                      0,
+                    ),
+                  }
                 : null,
               total: typeof l.value === 'number' ? l.value : 0,
             };
@@ -417,7 +432,7 @@ export class TemplateEvaluator {
     if (template.receipts?.attach !== false) {
       const seen = new Set<string>();
       const withReceipts = ctx.lines
-        .filter((l) => l.receiptIds.length > 0 && Math.abs(l.amount) >= receiptMin)
+        .filter((l) => l.receiptIds.length > 0 && Math.abs(l.txAmount ?? l.amount) >= receiptMin)
         .sort((a, b) => a.date.localeCompare(b.date) || a.payee.localeCompare(b.payee));
       for (const line of withReceipts) {
         for (const rid of line.receiptIds) {
@@ -452,14 +467,26 @@ export function evaluateTemplate(template: FormTemplate, ctx: EvalContext): Repo
   return new TemplateEvaluator(template, ctx).run();
 }
 
-/** Resolve an acroform mapping value: an expression, or text containing {{ }}. */
-export function acroValue(evaluator: TemplateEvaluator, spec: string, asMoney = true): string {
+const NOT_MONEY = /^(count\.[a-z_]+|period\.days)$/;
+
+/**
+ * Resolve an acroform mapping value: an expression (optionally followed by
+ * `| money`, `| number`, `| date`, `| yesno` or `| text`), or text with {{ }}.
+ * Numbers are written as money (1,234.56) unless they are counts or days.
+ */
+export function acroValue(evaluator: TemplateEvaluator, spec: string): string {
   if (spec.includes('{{')) return evaluator.interpolate(spec);
-  const v = evalExpr(spec, evaluator.resolve);
-  if (typeof v === 'number' && asMoney) {
+  const m = /^(.*?)\s*\|\s*(money|number|date|yesno|text)\s*$/.exec(spec);
+  const expr = (m ? m[1] : spec).trim();
+  const filter = m?.[2] ?? (NOT_MONEY.test(expr) ? 'number' : 'money');
+  const v = evalExpr(expr, evaluator.resolve);
+  if (v === null || v === undefined) return '';
+  if (filter === 'money' && typeof v === 'number') {
     const abs = Math.abs(Math.round(v));
     const s = `${Math.floor(abs / 100).toLocaleString('en-US')}.${String(abs % 100).padStart(2, '0')}`;
     return v < 0 ? `-${s}` : s;
   }
-  return v === null ? '' : String(v);
+  if (filter === 'number' && typeof v === 'number') return String(v);
+  if (filter === 'date' || filter === 'yesno') return formatValue(v, filter);
+  return String(v);
 }

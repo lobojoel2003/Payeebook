@@ -49,25 +49,44 @@ export function parseOfxTree(text: string): OfxNode {
   if (start < 0) throw new Error('This does not look like an OFX or QFX file (no <OFX> element).');
   const body = text.slice(start);
   const root: OfxNode = { name: '#root', children: [] };
-  const stack: OfxNode[] = [root];
-  const tagRe = /<(\/?)([A-Za-z0-9_.]+)[^>]*>([^<]*)/g;
+  // Each stack entry remembers its parent so that an element we guessed was an
+  // aggregate, but which was never closed, can be turned back into an empty leaf.
+  const stack: { node: OfxNode; parent: OfxNode | null }[] = [{ node: root, parent: null }];
+  const flatten = (entry: { node: OfxNode; parent: OfxNode | null }) => {
+    // An SGML element with no value and no closing tag is an empty leaf
+    // (for example <NAME> followed by <TRNAMT>); its "children" are siblings.
+    const { node, parent } = entry;
+    if (!parent || node.children.length === 0) return;
+    const at = parent.children.indexOf(node);
+    parent.children.splice(at + 1, 0, ...node.children);
+    node.children = [];
+    node.value = '';
+  };
+  const tagRe = /<(\/?)([A-Za-z0-9_.]+)[^>]*?(\/?)>([^<]*)/g;
   let m: RegExpExecArray | null;
   while ((m = tagRe.exec(body))) {
     const closing = m[1] === '/';
+    const selfClosing = m[3] === '/';
     const name = m[2].toUpperCase();
-    const text = m[3].trim();
+    const text = m[4].trim();
     if (closing) {
       // Pop up to and including the matching aggregate. Closing tags for
       // leaves (OFX 2.x) have no open aggregate and are ignored.
-      const idx = stack.map((n) => n.name).lastIndexOf(name);
-      if (idx > 0) stack.length = idx;
+      const idx = stack.map((e) => e.node.name).lastIndexOf(name);
+      if (idx > 0) {
+        for (let i = stack.length - 1; i > idx; i--) flatten(stack[i]);
+        stack.length = idx;
+      }
       continue;
     }
+    const parent = stack[stack.length - 1].node;
     const node: OfxNode = { name, children: [] };
-    stack[stack.length - 1].children.push(node);
-    if (text !== '') node.value = decodeEntities(text);
-    else stack.push(node);
+    parent.children.push(node);
+    if (selfClosing) node.value = '';
+    else if (text !== '') node.value = decodeEntities(text);
+    else stack.push({ node, parent });
   }
+  for (let i = stack.length - 1; i > 0; i--) flatten(stack[i]);
   return root;
 }
 

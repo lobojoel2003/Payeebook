@@ -236,6 +236,13 @@ export class Store {
       'INSERT INTO audit_log(book_id, ts, actor, action, entity, entity_id, summary, details, prev_hash, hash) VALUES (?,?,?,?,?,?,?,?,?,?)',
       [bookId, ts, actor, action, entity, entityId, summary, detailJson, prev, hash],
     );
+    // Anchor the head of the chain, so removing the newest entries is detected too.
+    const count =
+      this.scalar<number>('SELECT COUNT(*) FROM audit_log WHERE book_id = ?', [bookId]) ?? 0;
+    this.run('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)', [
+      `audit_head:${bookId}`,
+      `${count}:${hash}`,
+    ]);
   }
 
   listAudit(bookId: string, limit = 500): AuditEntry[] {
@@ -259,6 +266,16 @@ export class Store {
       if (r.prev_hash !== prev || r.hash !== expected)
         return { ok: false, count: rows.length, brokenAt: r.seq, head: prev };
       prev = r.hash;
+    }
+    const anchor = this.getMeta(`audit_head:${bookId}`);
+    if (anchor && anchor !== `${rows.length}:${prev}`) {
+      // The chain itself is intact but entries after the last one were removed.
+      return {
+        ok: false,
+        count: rows.length,
+        brokenAt: (rows[rows.length - 1]?.seq ?? 0) + 1,
+        head: prev,
+      };
     }
     return { ok: true, count: rows.length, head: prev };
   }
@@ -378,7 +395,11 @@ export class Store {
 
   createAccount(bookId: string, input: AccountInput): Account {
     if (!input.name.trim()) throw new ValidationError('Give the account a name.');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.opening_date))
+      throw new ValidationError('Enter the date the opening balance applies to.');
     return this.tx(() => {
+      // An opening balance inside a filed period would change what was filed.
+      this.assertUnlocked(bookId, input.opening_date);
       const id = newId('ac');
       this.run(
         'INSERT INTO accounts(id, book_id, name, kind, institution, last4, opening_balance, opening_date, closed, created_at) VALUES (?,?,?,?,?,?,?,?,0,?)',
@@ -413,8 +434,29 @@ export class Store {
     return this.tx(() => {
       const before = this.getAccount(id);
       if (!before) throw new ValidationError('Account not found.');
-      const fields = Object.keys(patch).filter((k) => k in before) as (keyof Account)[];
+      const fields = (
+        [
+          'name',
+          'kind',
+          'institution',
+          'last4',
+          'opening_balance',
+          'opening_date',
+          'closed',
+        ] as const
+      ).filter(
+        (k) =>
+          k in patch &&
+          (patch as Record<string, unknown>)[k] !==
+            (before as unknown as Record<string, unknown>)[k],
+      );
       if (!fields.length) return before;
+      if (fields.some((f) => f === 'opening_balance' || f === 'opening_date' || f === 'kind'))
+        this.assertUnlocked(
+          before.book_id,
+          before.opening_date,
+          patch.opening_date ?? before.opening_date,
+        );
       this.run(`UPDATE accounts SET ${fields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`, [
         ...fields.map((f) => ((patch as Record<string, unknown>)[f] ?? null) as SqlValue),
         id,
@@ -475,14 +517,30 @@ export class Store {
   deleteCategory(bookId: string, id: string) {
     this.tx(() => {
       const used =
-        this.scalar<number>('SELECT COUNT(*) FROM tx_lines WHERE book_id = ? AND category = ?', [
+        (this.scalar<number>(
+          'SELECT COUNT(*) FROM transactions WHERE book_id = ? AND category = ?',
+          [bookId, id],
+        ) ?? 0) +
+        (this.scalar<number>(
+          'SELECT COUNT(*) FROM splits s JOIN transactions t ON t.id = s.tx_id WHERE t.book_id = ? AND s.category = ?',
+          [bookId, id],
+        ) ?? 0);
+      if (used)
+        throw new ValidationError(`${used} transactions use this category. Re-tag them first.`);
+      const rules =
+        this.scalar<number>('SELECT COUNT(*) FROM rules WHERE book_id = ? AND category = ?', [
           bookId,
           id,
         ]) ?? 0;
-      if (used)
-        throw new ValidationError(`${used} transactions use this category. Re-tag them first.`);
+      this.run('DELETE FROM rules WHERE book_id = ? AND category = ?', [bookId, id]);
       this.run('DELETE FROM categories WHERE book_id = ? AND id = ?', [bookId, id]);
-      this.log(bookId, 'delete', 'category', id, `Deleted category "${id}"`);
+      this.log(
+        bookId,
+        'delete',
+        'category',
+        id,
+        `Deleted category "${id}"${rules ? ` and ${rules} remembered payee${rules === 1 ? '' : 's'} that used it` : ''}`,
+      );
     });
   }
 
@@ -500,6 +558,11 @@ export class Store {
   private assertUnlocked(bookId: string, ...dates: ISODate[]) {
     const through = this.lockedThrough(bookId);
     if (through && dates.some((d) => d <= through)) throw new LockedPeriodError(through);
+  }
+
+  private assertTxUnlocked(txId: string) {
+    const t = this.getTransaction(txId);
+    if (t) this.assertUnlocked(t.book_id, t.date);
   }
 
   // ------------------------------------------------------------ transactions
@@ -528,16 +591,15 @@ export class Store {
         ORDER BY t.date ASC, t.created_at ASC, t.id ASC`,
       params,
     );
-    const opening = f.accountId
-      ? (this.getAccount(f.accountId)?.opening_balance ?? 0)
-      : (this.scalar<number>(
-          'SELECT COALESCE(SUM(opening_balance), 0) FROM accounts WHERE book_id = ?',
-          [bookId],
-        ) ?? 0);
+    // Each account's opening balance counts from its opening date onwards.
+    const openings = (
+      f.accountId ? [this.getAccount(f.accountId)!].filter(Boolean) : this.listAccounts(bookId)
+    )
+      .map((a) => ({ date: a.opening_date, amount: a.opening_balance }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    let nextOpening = 0;
     const through = this.lockedThrough(bookId);
-    const book = this.getBook(bookId);
-    const threshold = book?.receipt_threshold ?? 5000;
-    let balance = opening;
+    let balance = 0;
     let splitCats: Map<string, string[]> | null = null;
     if (f.category) {
       splitCats = new Map();
@@ -552,7 +614,10 @@ export class Store {
     }
     const q = f.search?.trim().toLowerCase();
     const out: TxRow[] = [];
+    const needs = f.needsReceipt ? this.needsReceiptIds(bookId) : null;
     for (const r of rows) {
+      while (nextOpening < openings.length && openings[nextOpening].date <= r.date)
+        balance += openings[nextOpening++].amount;
       balance += r.amount;
       if (f.from && r.date < f.from) continue;
       if (f.to && r.date > f.to) continue;
@@ -561,7 +626,7 @@ export class Store {
         if (!cats.includes(f.category)) continue;
       }
       if (f.hasReceipt !== undefined && r.receipt_count > 0 !== f.hasReceipt) continue;
-      if (f.needsReceipt && !(r.amount <= -threshold && r.receipt_count === 0)) continue;
+      if (needs && !needs.has(r.id)) continue;
       if (q) {
         const hay =
           `${r.payee} ${r.raw_payee ?? ''} ${r.memo} ${r.check_number} ${(r.amount / 100).toFixed(2)}`.toLowerCase();
@@ -742,6 +807,12 @@ export class Store {
           throw new ValidationError('Each split needs an amount.');
       }
       this.run('DELETE FROM splits WHERE tx_id = ?', [txId]);
+      // When split, the parts carry the tags; the parent's own tag no longer applies.
+      if (splits.length && t.category !== null)
+        this.run('UPDATE transactions SET category = NULL, updated_at = ? WHERE id = ?', [
+          this.ts(),
+          txId,
+        ]);
       for (const s of splits) {
         this.run('INSERT INTO splits(id, tx_id, amount, category, memo) VALUES (?,?,?,?,?)', [
           newId('sp'),
@@ -786,11 +857,10 @@ export class Store {
     const through = this.lockedThrough(bookId);
     return rows.map((r, i) => {
       const key = keys[i];
-      const status = existing.has(key)
-        ? 'duplicate'
-        : through && r.date <= through
-          ? 'locked'
-          : 'new';
+      // A FITID repeated inside one file is the same bank transaction listed twice.
+      const repeated = existing.has(key);
+      existing.add(key);
+      const status = repeated ? 'duplicate' : through && r.date <= through ? 'locked' : 'new';
       return {
         ...r,
         key,
@@ -913,12 +983,8 @@ export class Store {
         { pattern: normalized, category, direction },
       );
       if (!applyToExisting) return 0;
-      const through = this.lockedThrough(bookId);
       const rules = this.listRules(bookId);
-      const untagged = this.all<Transaction>(
-        `SELECT * FROM transactions t WHERE book_id = ? AND category IS NULL AND NOT EXISTS (SELECT 1 FROM splits s WHERE s.tx_id = t.id) ${through ? 'AND date > ?' : ''}`,
-        through ? [bookId, through] : [bookId],
-      );
+      const untagged = this.untaggedCandidates(bookId);
       const ids = untagged
         .filter(
           (t) =>
@@ -951,17 +1017,26 @@ export class Store {
       hits: 0,
       created_at: '',
     };
-    const untagged = this.all<Transaction>(
-      'SELECT * FROM transactions WHERE book_id = ? AND category IS NULL',
-      [bookId],
+    return this.untaggedCandidates(bookId).filter((t) =>
+      matchRule([fake], t.raw_payee || t.payee, t.amount),
+    ).length;
+  }
+
+  /** Untagged, unsplit transactions outside any filed period: the ones a new rule may tag. */
+  private untaggedCandidates(bookId: string): Transaction[] {
+    const through = this.lockedThrough(bookId);
+    return this.all<Transaction>(
+      `SELECT * FROM transactions t WHERE book_id = ? AND category IS NULL
+         AND NOT EXISTS (SELECT 1 FROM splits s WHERE s.tx_id = t.id) ${through ? 'AND date > ?' : ''}`,
+      through ? [bookId, through] : [bookId],
     );
-    return untagged.filter((t) => matchRule([fake], t.raw_payee || t.payee, t.amount)).length;
   }
 
   // --------------------------------------------------------------- receipts
 
   addReceipt(bookId: string, input: ReceiptInput): ReceiptMeta {
     return this.tx(() => {
+      if (input.tx_id) this.assertTxUnlocked(input.tx_id);
       const id = newId('rc');
       this.run(
         `INSERT INTO receipts(id, book_id, tx_id, filename, mime, data, thumb, size, ocr_text, ocr_confidence, ocr_total, ocr_date, ocr_merchant, note, created_at)
@@ -1036,8 +1111,23 @@ export class Store {
     this.tx(() => {
       const r = this.getReceipt(id);
       if (!r) throw new ValidationError('Receipt not found.');
-      const fields = Object.keys(patch) as (keyof typeof patch)[];
+      const allowed = [
+        'tx_id',
+        'note',
+        'ocr_text',
+        'ocr_total',
+        'ocr_date',
+        'ocr_merchant',
+        'ocr_confidence',
+      ];
+      const fields = (Object.keys(patch) as (keyof typeof patch)[]).filter((f) =>
+        allowed.includes(f),
+      );
       if (!fields.length) return;
+      if ('tx_id' in patch && patch.tx_id !== r.tx_id) {
+        if (r.tx_id) this.assertTxUnlocked(r.tx_id);
+        if (patch.tx_id) this.assertTxUnlocked(patch.tx_id);
+      }
       this.run(`UPDATE receipts SET ${fields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`, [
         ...fields.map((f) => (patch[f] ?? null) as SqlValue),
         id,
@@ -1081,7 +1171,7 @@ export class Store {
         'SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE account_id = ? AND date <= ?',
         [accountId, asOf],
       ) ?? 0;
-    return a.opening_balance + sum;
+    return (asOf >= a.opening_date ? a.opening_balance : 0) + sum;
   }
 
   savingKinds(bookId: string): string[] {
@@ -1155,26 +1245,50 @@ export class Store {
     );
   }
 
-  counts(bookId: string, from: ISODate = '0000-01-01', to: ISODate = '9999-12-31') {
+  /** Ledger lines with no tag, or a tag that no longer exists. */
+  untaggedLineCount(bookId: string, from: ISODate = '0000-01-01', to: ISODate = '9999-12-31') {
+    const known = this.categoryIndex(bookId);
+    return this.all<{ category: string | null }>(
+      'SELECT category FROM tx_lines WHERE book_id = ? AND date BETWEEN ? AND ?',
+      [bookId, from, to],
+    ).filter((l) => !known.get(l.category)).length;
+  }
+
+  /**
+   * Payments at or above the book's receipt threshold with no receipt attached,
+   * ignoring money that only moved between the beneficiary's own accounts or into savings.
+   */
+  needsReceiptIds(
+    bookId: string,
+    from: ISODate = '0000-01-01',
+    to: ISODate = '9999-12-31',
+  ): Set<string> {
     const threshold = this.getBook(bookId)?.receipt_threshold ?? 5000;
+    const cats = this.categoryIndex(bookId);
+    const neutral = (c: string | null) => {
+      const kind = cats.get(c)?.kind;
+      return kind === 'transfer' || kind === 'saving';
+    };
+    const lines = this.all<{ tx_id: string; category: string | null }>(
+      `SELECT l.tx_id, l.category FROM tx_lines l JOIN transactions t ON t.id = l.tx_id
+        WHERE l.book_id = ? AND l.date BETWEEN ? AND ? AND t.amount <= ?
+          AND NOT EXISTS (SELECT 1 FROM receipts r WHERE r.tx_id = l.tx_id)`,
+      [bookId, from, to, -threshold],
+    );
+    const ids = new Set<string>();
+    for (const l of lines) if (!neutral(l.category)) ids.add(l.tx_id);
+    return ids;
+  }
+
+  counts(bookId: string, from: ISODate = '0000-01-01', to: ISODate = '9999-12-31') {
     return {
       transactions:
         this.scalar<number>(
           'SELECT COUNT(*) FROM transactions WHERE book_id = ? AND date BETWEEN ? AND ?',
           [bookId, from, to],
         ) ?? 0,
-      untagged:
-        this.scalar<number>(
-          'SELECT COUNT(*) FROM tx_lines WHERE book_id = ? AND category IS NULL AND date BETWEEN ? AND ?',
-          [bookId, from, to],
-        ) ?? 0,
-      missing_receipts:
-        this.scalar<number>(
-          `SELECT COUNT(*) FROM transactions t WHERE book_id = ? AND date BETWEEN ? AND ? AND amount <= ?
-             AND NOT EXISTS (SELECT 1 FROM receipts r WHERE r.tx_id = t.id)
-             AND COALESCE(category, '') NOT IN ('transfer', 'saved')`,
-          [bookId, from, to, -threshold],
-        ) ?? 0,
+      untagged: this.untaggedLineCount(bookId, from, to),
+      missing_receipts: this.needsReceiptIds(bookId, from, to).size,
       unmatched_receipts:
         this.scalar<number>('SELECT COUNT(*) FROM receipts WHERE book_id = ? AND tx_id IS NULL', [
           bookId,
@@ -1407,8 +1521,10 @@ export class Store {
       payee: string;
       memo: string;
       check_number: string;
+      tx_amount: number;
     }>(
-      'SELECT * FROM tx_lines WHERE book_id = ? AND date >= ? AND date <= ? ORDER BY date, tx_id, line_id',
+      `SELECT l.*, t.amount AS tx_amount FROM tx_lines l JOIN transactions t ON t.id = l.tx_id
+        WHERE l.book_id = ? AND l.date >= ? AND l.date <= ? ORDER BY l.date, l.tx_id, l.line_id`,
       [bookId, period.start, period.end],
     ).map((l) => {
       const a = kindOf.get(l.account_id);
@@ -1425,6 +1541,7 @@ export class Store {
         accountName: a?.name ?? '',
         accountKind: a?.kind ?? 'other',
         receiptIds: receipts.get(l.tx_id) ?? [],
+        txAmount: l.tx_amount,
       };
     });
     const dayBefore = addDays(period.start, -1);

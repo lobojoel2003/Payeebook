@@ -4,7 +4,7 @@ schema: payeebook/template@1
 id: ssa-623-payee-report
 name: Representative Payee Report worksheet (SSA-623 / SSA-6230)
 short_name: SSA-623
-version: 1.0.0
+version: 1.0.1
 kind: ssa
 status: draft
 jurisdiction:
@@ -103,8 +103,9 @@ sections:
         input: moved
 
 checks:
-  - label: Amount spent plus amount saved equals benefits received
-    assert: used.total + saved.saved == received.benefits || used.total > received.benefits
+  - label: Benefits were received in this period
+    assert: received.benefits > 0
+    help: If benefits were deposited, check the period dates and that the deposits are tagged as Social Security or SSI benefits.
   - label: Every transaction in the period is tagged
     assert: count.untagged == 0
     severity: warning
