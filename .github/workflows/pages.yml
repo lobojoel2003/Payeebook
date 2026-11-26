@@ -27,13 +27,13 @@ jobs:
     outputs:
       enabled: ${{ steps.pages.outcome == 'success' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Check GitHub Pages is enabled
         id: pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
         continue-on-error: true
         with:
           # Tries to switch Pages on (source: GitHub Actions). If the token is not
@@ -44,7 +44,7 @@ jobs:
         if: steps.pages.outcome != 'success'
         run: echo "::notice title=GitHub Pages is not enabled::Enable it in Settings → Pages → Build and deployment → Source → GitHub Actions, then re-run this workflow to publish the web app."
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         if: steps.pages.outcome == 'success'
         with:
           node-version-file: .nvmrc
@@ -59,7 +59,7 @@ jobs:
           npm ci
           npm run build
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         if: steps.pages.outcome == 'success'
         with:
           path: dist
@@ -74,4 +74,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
